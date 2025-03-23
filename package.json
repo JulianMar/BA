@@ -9,9 +9,11 @@
     "typescript": "^5.0.0"
   },
   "scripts": {
-    "start": "bun run main.ts"
+    "start": "bun run main.ts",
+    "download": "bun run download.ts"
   },
   "dependencies": {
-    "zx": "^8.3.2"
+    "exceljs": "^4.4.0",
+    "node-xlsx": "^0.24.0"
   }
 }
