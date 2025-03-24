@@ -4,7 +4,7 @@ type ValidationError = {
   type: string;
 };
 
-type Validations =
+export type Validations =
   | "everyLineIsReferenced"
   | "everyScheduledStopPointHasAName"
   | "locationsAreReferencingTheSamePoint"
@@ -38,28 +38,36 @@ type NeTExResult = {
   validations: Validation[];
 }
 
-type NeTExResults = NeTExResult[];
+export type NeTExResults = NeTExResult[];
+
+const severityMap = {
+  low: 1,
+  lowMid: 2,
+  mid: 3,
+  midHigh: 4,
+  high: 5
+}
 
 export const severity: Record<Validations, number> = {
-  everyStopPlaceIsReferenced: 10,
-  everyStopPointIsReferenced: 20,
-  everyLineIsReferenced: 20,
-  customPublicationTimeStampIsAvailable: 20,
-  customServiceCalendarIsCurrentYear: 30,
-  everyScheduledStopPointHasAName: 30,
-  stopPlaceQuayDistanceIsReasonable: 30,
-  locationsAreReferencingTheSamePoint: 30,
-  netexKeyRefConstraints: 30,
-  netexUniqueConstraints: 30,
-  everyStopPlaceHasACorrectStopPlaceType: 30,
-  frameDefaultsHaveALocaleAndTimeZone: 30,
-  passingTimesHaveIncreasingTimes: 40,
-  everyStopPlaceHasAName: 40,
-  everyStopPointHaveArrivalAndDepartureTime: 40,
-  passingTimesIsNotDecreasing: 50,
-  xsd: 50,
-  xsdEPIP: 50,
-  xsdAustrian: 50,
+  everyStopPlaceIsReferenced: severityMap.low,
+  everyStopPointIsReferenced: severityMap.lowMid,
+  everyLineIsReferenced: severityMap.lowMid,
+  customPublicationTimeStampIsAvailable: severityMap.lowMid,
+  customServiceCalendarIsCurrentYear: severityMap.mid,
+  everyScheduledStopPointHasAName: severityMap.mid,
+  stopPlaceQuayDistanceIsReasonable: severityMap.mid,
+  locationsAreReferencingTheSamePoint: severityMap.mid,
+  netexKeyRefConstraints: severityMap.mid,
+  netexUniqueConstraints: severityMap.mid,
+  everyStopPlaceHasACorrectStopPlaceType: severityMap.mid,
+  frameDefaultsHaveALocaleAndTimeZone: severityMap.mid,
+  passingTimesHaveIncreasingTimes: severityMap.midHigh,
+  everyStopPlaceHasAName: severityMap.midHigh,
+  everyStopPointHaveArrivalAndDepartureTime: severityMap.midHigh,
+  passingTimesIsNotDecreasing: severityMap.high,
+  xsd: severityMap.high,
+  xsdEPIP: severityMap.high,
+  xsdAustrian: severityMap.high,
 };
 
 export type ValidationResult = {

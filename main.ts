@@ -1,8 +1,15 @@
 import { exec } from "node:child_process";
-import { readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync, readFileSync } from "node:fs";
 import { promisify } from "node:util";
-import { doAnalysis, severity, type ValidationResult } from "./analysis";
+import {
+  doAnalysis,
+  severity,
+  type NeTExResults,
+  type ValidationResult,
+  type Validations,
+} from "./analysis";
 import xlsx from "node-xlsx";
+import { downloadNeTExData } from "./download";
 
 const promiseExec = promisify(exec);
 
@@ -10,12 +17,52 @@ const currentPath = import.meta.dir;
 const dataFolder = `${currentPath}/data/testdata`;
 const ruleFolder = `${currentPath}/rules`;
 const profileFolder = `${currentPath}/profile`;
+const cacheFolder = `${currentPath}/.cache`;
+
+const hashKey = async (key: string) => {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(key);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return hashHex;
+};
+
+const cacheSet = async (key: string, value: any) => {
+  const hashedKey = await hashKey(key);
+
+  const cacheFile = `${cacheFolder}/${hashedKey}.json`;
+  mkdirSync(`${cacheFolder}`, { recursive: true });
+  writeFileSync(cacheFile, JSON.stringify(value));
+}
+
+const cacheGet = async (key: string) => {
+  if (Bun.argv.includes("no-cache")) {
+    return null;
+  }
+
+  const hashedKey = await hashKey(key);
+  try {
+    const data = readdirSync(`${cacheFolder}`).find((file) => file === `${hashedKey}.json`);
+    if (data) {
+      const file = `${cacheFolder}/${data}`;
+      const fileData = JSON.parse(readFileSync(file, "utf-8"));
+      
+      return fileData;
+    }
+  } catch (error) {
+    console.error("Cache not found", error);
+  }
+  return null;
+}
 
 const callDocker = async (
   command: string,
   args: string[][],
   customRules: boolean = false,
-  customProfile: boolean = false,
+  customProfile: boolean = false
 ) => {
   const defaults = [
     ["--output", "json"],
@@ -38,6 +85,13 @@ const callDocker = async (
 
   const finalCommand = `docker run ${volumes} -i --rm itxpt/greenlight ${command} ${finalArgs}`;
 
+  const hasCache = await cacheGet(finalCommand);
+  if (hasCache) {
+    console.log("Cache hit");
+    return hasCache;
+  }
+  console.log("Cache miss");
+
   try {
     const { stdout, stderr } = await promiseExec(finalCommand, {
       encoding: "utf-8",
@@ -48,33 +102,35 @@ const callDocker = async (
       throw new Error(stderr);
     }
 
-    return JSON.parse(stdout);
+    const result = JSON.parse(stdout);
+
+    cacheSet(finalCommand, result);
+    return result;
   } catch (error) {
     console.error("error:", error);
   }
 };
 
-const replaceName = (checks: any, name: string) => {
-  return checks.map(item => {
-    item.validations = item.validations.map(validation => {
-      validation.name = name
-      validation.errors = validation.errors.map(error => {
-        error.type = name
+const replaceName = (checks: NeTExResults, name: Validations) => {
+  return checks.map((item) => {
+    item.validations = item.validations.map((validation) => {
+      validation.name = name;
+      validation.errors = validation.errors?.map((error) => {
+        error.type = name;
 
         return error;
-      })
+      });
       return validation;
-    })
+    });
     return item;
-  })
-}
+  });
+};
 
-const addToResult = (result: any, additionalResult: any) => {
+const addToResult = (result: NeTExResults, additionalResult: NeTExResults) => {
   result.map((res) => {
     const additionalResultItem = additionalResult.find(
       (item) => item.name === res.name
     );
-    console.log(res.name, additionalResultItem);
     if (additionalResultItem) {
       res.validations.push(...additionalResultItem.validations);
       if (!res.valid || !additionalResultItem.valid) {
@@ -82,48 +138,48 @@ const addToResult = (result: any, additionalResult: any) => {
       }
     }
     return res;
-  })
+  });
   return result;
-}
+};
 
 const runValidation = async (file: string) => {
   console.log(`Running validation for ${file}`);
-  let result = await callDocker(
-    "validate",
-    [["-i", `testdata/${file}`]],
-    true
-  );
+  let result = await callDocker("validate", [["-i", `testdata/${file}`]], true, false);
 
-  let epipXSD = await callDocker(
-    "validate",
-    [["-i", `testdata/${file}`], ["--profile", "/usr/local/greenlight/profile/epip/profile.json"]],
-    false,
-    true,
-  );
+  if (Bun.argv.includes("epip")) {
+    console.log(`Running epip validation for ${file}`);
 
-  epipXSD = replaceName(epipXSD, 'xsdEPIP')
+    let epipXSD = await callDocker(
+      "validate",
+      [
+        ["-i", `testdata/${file}`],
+        ["--profile", "/usr/local/greenlight/profile/epip/profile.json"],
+      ],
+      false,
+      true
+    );
 
-  console.log(epipXSD)
+    epipXSD = replaceName(epipXSD, "xsdEPIP");
+    result = addToResult(result, epipXSD);
+  }
 
-  let austrianXSD = await callDocker(
-    "validate",
-    [["-i", `testdata/${file}`], ["--profile", "/usr/local/greenlight/profile/austrian/profile.json"]],
-    false,
-    true,
-  );
+  if (Bun.argv.includes("austrian")) {
+    console.log(`Running austrian profile validation for ${file}`);
+    let austrianXSD = await callDocker(
+      "validate",
+      [
+        ["-i", `testdata/${file}`],
+        ["--profile", "/usr/local/greenlight/profile/austrian/profile.json"],
+      ],
+      false,
+      true
+    );
 
-  austrianXSD = replaceName(austrianXSD, 'xsdAustrian')
-  console.log(austrianXSD)
+    austrianXSD = replaceName(austrianXSD, "xsdAustrian");
+    result = addToResult(result, austrianXSD);
+  }
 
-  result = addToResult(result, epipXSD);
-  result = addToResult(result, austrianXSD);
-
-  // additionalResult[1].validations = additionalResult[1].validations.map((validation) =>  {
-  //   validation.name = 'xsdAustrian'
-  //   return validation;
-  // })
-
-  // result.push(...additionalResult);
+  console.log(`Validation done for ${file}`);
 
   return result;
 };
@@ -131,52 +187,90 @@ const runValidation = async (file: string) => {
 const generateExcel = async (data: ValidationResult[], file: string) => {
   const headers = ["Name", "Score", ...Object.keys(severity)];
 
-  const rows = data.map((item) => {
-    const validations = Object.keys(severity).flatMap((key) => {
-      return (
-        item.validations.find((validation) => validation.name === key)?.score ||
-        0
-      );
-    });
-    return [
-      item.name
-        .split("/")[2]
-        .split(".xml")[0]
-        .split("LINE_")[1]
-        .split("_" + file.split("-")[0])[0], // extract the date from the main file and remove that part from the line name
-      item.score,
-      ...validations,
-    ];
-  }).sort((a, b) =>  a[0].localeCompare(b[0]));
+  const rows = data
+    .map((item) => {
+      const validations = Object.keys(severity).flatMap((key) => {
+        return (
+          item.validations.find((validation) => validation.name === key)
+            ?.score || 0
+        );
+      });
+
+      let name = item.name;
+      if (name.includes("obb")) {
+        name = item.name
+          .split("/")[2]
+          .split(".xml")[0]
+          .split("LINE_")[1]
+          .split("_")[1];
+      } else if (name.includes("LINE_")) {
+        name = item.name
+          .split("/")[2]
+          .split(".xml")[0]
+          .split("LINE_")[1]
+          .split("_" + file.split("-")[0])[0]; // extract the date from the main file and remove that part from the line name
+      }
+
+      return [name, item.score, ...validations];
+    })
+    .sort((a, b) => a[0].localeCompare(b[0]));
 
   const sheetData = [headers, ...rows];
 
+  let name = file;
+  if (name.includes("obb")) {
+    name = "obb";
+  } else if (name.includes("netex_")) {
+    name = name.split("netex_")[1].split("_20")[0];
+  }
+
   return {
-    name: file.split("netex_")[1].split("_20")[0],
+    name,
     data: sheetData,
     options: {},
   };
 };
 
+const runTest = async (file: string) => {
+  const result = await runValidation(file);
+
+  if (Bun.argv.includes("debug")) {
+    mkdirSync("output/debug", { recursive: true });
+    writeFileSync(`output/debug/${file}.json`, JSON.stringify(result));
+  }
+
+  console.log(`Running analysis for ${file}`);
+
+  const analysisResult = await doAnalysis(result);
+
+  console.log(`Analysis done for ${file}`);
+
+  return generateExcel(analysisResult, file);
+};
+
 const main = async () => {
+  if (Bun.argv.includes("download")) {
+    console.log("Downloading test data...");
+    await downloadNeTExData();
+  }
+
   const allFiles = readdirSync(dataFolder).filter((file) =>
     file.endsWith(".zip")
   );
 
-  const allSheetsPromises = await allFiles.map(async (file) => {
-    const result = await runValidation(file);
+  let allSheets = []
+  for (const file of allFiles) {
+    const result = await runTest(file);
+    allSheets.push(result);
+  }
 
-    writeFileSync('debug.json', JSON.stringify(result));
-
-    const analysisResult = await doAnalysis(result);
-
-    return generateExcel(analysisResult, file);
-  });
-
-  const allSheets = await Promise.all(allSheetsPromises);
+  console.log("All files have been processed");
+  console.log("Generating Excel file...");
 
   const buffer = xlsx.build(allSheets);
-  const name = `output/output-${(new Date().toLocaleDateString()).replaceAll('/', '-')}.xlsx`;
+  const name = `output/output-${new Date()
+    .toLocaleDateString()
+    .replaceAll("/", "-")}.xlsx`;
   writeFileSync(name, buffer);
 };
 

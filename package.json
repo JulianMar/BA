@@ -13,7 +13,6 @@
     "download": "bun run download.ts"
   },
   "dependencies": {
-    "exceljs": "^4.4.0",
     "node-xlsx": "^0.24.0"
   }
 }
