@@ -8,7 +8,7 @@
             "description": "epip test",
             "version": "0.0.1",
             "config": {
-                "schema": "profile/epip/test/NeTEx_publication_EPIP.xsd"
+                "schema": "profile/epip/1.1.2/NeTEx_publication_EPIP.xsd"
             }
         }
     ]

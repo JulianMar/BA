@@ -10,6 +10,7 @@ import {
 } from "./analysis";
 import xlsx from "node-xlsx";
 import { downloadNeTExData } from "./download";
+import { deepAnalysis } from "./deepAnalysis";
 
 const promiseExec = promisify(exec);
 
@@ -36,7 +37,7 @@ const cacheSet = async (key: string, value: any) => {
   const cacheFile = `${cacheFolder}/${hashedKey}.json`;
   mkdirSync(`${cacheFolder}`, { recursive: true });
   writeFileSync(cacheFile, JSON.stringify(value));
-}
+};
 
 const cacheGet = async (key: string) => {
   if (Bun.argv.includes("no-cache")) {
@@ -45,18 +46,20 @@ const cacheGet = async (key: string) => {
 
   const hashedKey = await hashKey(key);
   try {
-    const data = readdirSync(`${cacheFolder}`).find((file) => file === `${hashedKey}.json`);
+    const data = readdirSync(`${cacheFolder}`).find(
+      (file) => file === `${hashedKey}.json`
+    );
     if (data) {
       const file = `${cacheFolder}/${data}`;
       const fileData = JSON.parse(readFileSync(file, "utf-8"));
-      
+
       return fileData;
     }
   } catch (error) {
     console.error("Cache not found", error);
   }
   return null;
-}
+};
 
 const callDocker = async (
   command: string,
@@ -142,9 +145,14 @@ const addToResult = (result: NeTExResults, additionalResult: NeTExResults) => {
   return result;
 };
 
-const runValidation = async (file: string) => {
+const runValidation = async (file: string): Promise<NeTExResults> => {
   console.log(`Running validation for ${file}`);
-  let result = await callDocker("validate", [["-i", `testdata/${file}`]], true, false);
+  let result = await callDocker(
+    "validate",
+    [["-i", `testdata/${file}`]],
+    true,
+    false
+  );
 
   if (Bun.argv.includes("epip")) {
     console.log(`Running epip validation for ${file}`);
@@ -181,11 +189,11 @@ const runValidation = async (file: string) => {
 
   console.log(`Validation done for ${file}`);
 
-  return result;
+  return result as NeTExResults;
 };
 
 const generateExcel = async (data: ValidationResult[], file: string) => {
-  const headers = ["Name", "Score", ...Object.keys(severity)];
+  const headers = ["Name", "Severity", ...Object.keys(severity)];
 
   const rows = data
     .map((item) => {
@@ -215,7 +223,7 @@ const generateExcel = async (data: ValidationResult[], file: string) => {
     })
     .sort((a, b) => a[0].localeCompare(b[0]));
 
-  const sheetData = [headers, ...rows];
+  const sheetData = [headers, ...rows, ["sum:", {f: `sum(B2:B${rows.length + 1})`}, {f: `count(B2:B${rows.length + 1})`}]];
 
   let name = file;
   if (name.includes("obb")) {
@@ -237,6 +245,14 @@ const runTest = async (file: string) => {
   if (Bun.argv.includes("debug")) {
     mkdirSync("output/debug", { recursive: true });
     writeFileSync(`output/debug/${file}.json`, JSON.stringify(result));
+
+    const sheets = deepAnalysis(result)
+
+    const buffer = xlsx.build(sheets);
+    const name = `output/debug/${file}-${new Date()
+      .toLocaleDateString()
+      .replaceAll("/", "-")}.xlsx`;
+    writeFileSync(name, buffer);
   }
 
   console.log(`Running analysis for ${file}`);
@@ -258,16 +274,28 @@ const main = async () => {
     file.endsWith(".zip")
   );
 
-  let allSheets = []
+  let allSheets = [];
   for (const file of allFiles) {
     const result = await runTest(file);
     allSheets.push(result);
   }
 
   console.log("All files have been processed");
+
+  const summarySheet = {
+    name: "Summary",
+    data: [
+      ["Name", "Sum of Weighted Severity", "files", "severity / files"],
+      ...allSheets.map((sheet) => {
+        return [sheet.name, {f: `${sheet.name}!B${sheet.data.length}`}, {f: `${sheet.name}!C${sheet.data.length}`}, {f: `${sheet.name}!B${sheet.data.length}/${sheet.name}!C${sheet.data.length}`}];
+      }),
+    ],
+    options: {},
+  }
+
   console.log("Generating Excel file...");
 
-  const buffer = xlsx.build(allSheets);
+  const buffer = xlsx.build([summarySheet, ...allSheets]);
   const name = `output/output-${new Date()
     .toLocaleDateString()
     .replaceAll("/", "-")}.xlsx`;
