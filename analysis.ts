@@ -22,6 +22,7 @@ export type Validations =
   | "xsd"
   | "xsdEPIP"
   | "xsdAustrian"
+  | "xsdNetex110"
   | "customPublicationTimeStampIsAvailable"
   | "customServiceCalendarIsCurrentYear";
 
@@ -68,6 +69,7 @@ export const severity: Record<Validations, number> = {
   xsd: severityMap.high,
   xsdEPIP: severityMap.high,
   xsdAustrian: severityMap.high,
+  xsdNetex110: severityMap.high,
 };
 
 export type ValidationResult = {

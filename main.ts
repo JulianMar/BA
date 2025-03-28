@@ -86,7 +86,7 @@ const callDocker = async (
     volumes += ` -v ${currentPath}/rules:/usr/local/greenlight/builtin`;
   }
 
-  const finalCommand = `docker run ${volumes} -i --rm itxpt/greenlight ${command} ${finalArgs}`;
+  const finalCommand = `docker run ${volumes} -i --rm itxpt/greenlight:1.0.7 ${command} ${finalArgs}`;
 
   const hasCache = await cacheGet(finalCommand);
   if (hasCache) {
@@ -168,6 +168,23 @@ const runValidation = async (file: string): Promise<NeTExResults> => {
     );
 
     epipXSD = replaceName(epipXSD, "xsdEPIP");
+    result = addToResult(result, epipXSD);
+  }
+
+  if (Bun.argv.includes("netex-old")) {
+    console.log(`Running netex old validation for ${file}`);
+
+    let epipXSD = await callDocker(
+      "validate",
+      [
+        ["-i", `testdata/${file}`],
+        ["--profile", "/usr/local/greenlight/profile/netex/profile.json"],
+      ],
+      false,
+      true
+    );
+
+    epipXSD = replaceName(epipXSD, "xsdNetex110");
     result = addToResult(result, epipXSD);
   }
 
@@ -293,9 +310,36 @@ const main = async () => {
     options: {},
   }
 
+  const summaryByError = {
+    name: "Summary by Error",
+    data: [
+      ["Name", ...Object.keys(severity)],
+      ...allSheets.map((sheet) => {
+        const validations = Object.keys(severity).flatMap((key) => {
+          const row = sheet.data[0].findIndex((validation) => validation === key);
+          return sheet.data.reduce((acc, item) => {
+              const current = item[row];
+
+              if (current && typeof current !== "object" && typeof current !== "string") {
+                return acc + current;
+              }
+
+              return acc;
+            }, 0)
+        });
+        return [sheet.name, ...validations];
+      }),
+      ["sum:", {f: `sum(B2:B${allSheets.length + 1})`}, {f: `sum(C2:C${allSheets.length + 1})`}],
+      ["avg:", {f: `average(B2:B${allSheets.length + 1})`}, {f: `average(C2:C${allSheets.length + 1})`}],
+      ["min:", {f: `min(B2:B${allSheets.length + 1})`}, {f: `min(C2:C${allSheets.length + 1})`}],
+      ["max:", {f: `max(B2:B${allSheets.length + 1})`}, {f: `max(C2:C${allSheets.length + 1})`}],
+    ],
+    options: {},
+  };
+
   console.log("Generating Excel file...");
 
-  const buffer = xlsx.build([summarySheet, ...allSheets]);
+  const buffer = xlsx.build([summarySheet, summaryByError, ...allSheets]);
   const name = `output/output-${new Date()
     .toLocaleDateString()
     .replaceAll("/", "-")}.xlsx`;

@@ -1,0 +1,15 @@
+{
+    "name": "xsdCheck",
+    "description": "check epip and austrian netex profile",
+    "version": "0.0.1",
+    "scripts": [
+        {
+            "name": "xsd",
+            "description": "epip test",
+            "version": "0.0.1",
+            "config": {
+                "schema": "profile/netex/1.10/NeTEx_publication.xsd"
+            }
+        }
+    ]
+}
